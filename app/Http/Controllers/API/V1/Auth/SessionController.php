@@ -3,22 +3,25 @@
 namespace App\Http\Controllers\API\V1\Auth;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
-use App\Mail\ReferralMail;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
+use Tymon\JWTAuth\Facades\JWTAuth;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class SessionController extends Controller
 {
+    /**
+     * Register a new user.
+     */
     public function register(Request $request)
     {
+        // Validate the request
         $attributes = Validator::make($request->all(), [
-            'email' => 'required|string|email:rfc|max:255|unique:users',
+            'email' => 'required|string|email:rfc,dns|max:255|unique:users',
             'password' => 'required|string|min:6',
-            'referral_code' => 'nullable|string',
+            'referral_code' => 'nullable|string'
         ]);
 
         if ($attributes->fails()) {
@@ -28,6 +31,7 @@ class SessionController extends Controller
             ], 422);
         }
 
+        // Validate email domain
         $email = $request->email;
         $emailParts = explode('@', $email);
         $domain = array_pop($emailParts);
@@ -42,14 +46,12 @@ class SessionController extends Controller
         try {
             DB::beginTransaction();
 
-            // Handle referral code if provided
+            // Handle referral logic if applicable
             $referralUser = null;
             if (!empty($request->referral_code)) {
-                $referral_code = $request->referral_code;
-                $referralUser = User::where('invite_link', $referral_code)->first();
-
+                $referralUser = User::where('invite_link', $request->referral_code)->first();
                 if ($referralUser) {
-                    Mail::to($referralUser->email)->queue(new ReferralMail($referralUser->name));
+                    // Logic for handling referral actions (e.g., sending an email)
                 }
             }
 
@@ -63,45 +65,101 @@ class SessionController extends Controller
 
             DB::commit();
 
+            // Generate a JWT token for the registered user
+            $token = JWTAuth::fromUser($user);
+
             return response()->json([
                 'status_code' => 201,
                 'message' => 'User registered successfully.',
+                'token' => $token,
                 'user' => $user,
             ], 201);
-
         } catch (\Exception $e) {
             DB::rollBack();
-
             return response()->json([
                 'status_code' => 500,
-                'message' => 'Registration failed. Please try again.',
+                'message' => 'Registration failed.',
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
 
+    /**
+     * User login with JWT token generation.
+     */
+    public function login(Request $request)
+    {
+        // Validate login credentials
+        $attributes = Validator::make($request->all(), [
+            'email' => 'required|string|email:rfc,dns|max:255',
+            'password' => 'required|string|min:6',
+        ]);
+
+        if ($attributes->fails()) {
+            return response()->json([
+                'status_code' => 422,
+                'message' => $attributes->errors(),
+            ], 422);
+        }
+
+        // Attempt to authenticate the user and generate a token
+        $credentials = $request->only('email', 'password');
+        if (!$token = JWTAuth::attempt($credentials)) {
+            return response()->json([
+                'status_code' => 401,
+                'message' => 'Invalid credentials.',
+            ], 401);
+        }
+
+        return response()->json([
+            'status_code' => 200,
+            'message' => 'Login successful.',
+            'token' => $token,
+        ], 200);
+    }
+
+    public function logout(Request $request)
+    {
+        try {
+            // Invalidate the token
+            JWTAuth::invalidate(JWTAuth::getToken());
+
+            return response()->json([
+                'status_code' => 200,
+                'message' => 'User successfully logged out.',
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status_code' => 500,
+                'message' => 'Failed to logout, please try again.',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Validate the domain of the email.
+     */
     private function isValidDomain($domain)
     {
-        // Check if the domain matches a valid domain format using regex
+        // Check if the domain matches a valid format
         $isValidFormat = preg_match('/^(?:[-A-Za-z0-9]+\.)+[A-Za-z]{2,6}$/', $domain);
-    
-        if (!$isValidFormat) {
+
+        // Check if the domain has valid DNS records
+        if (!$isValidFormat || (!checkdnsrr($domain, 'MX') && !checkdnsrr($domain, 'A'))) {
             return false;
         }
-    
-        // Check if the domain has a valid MX or A record
-        if (!checkdnsrr($domain, 'MX') && !checkdnsrr($domain, 'A')) {
-            return false;
-        }
-    
+
         return true;
     }
-    
+
+    /**
+     * Generate a unique invite code for the user.
+     */
     private function getInviteCode()
     {
-        // Generate a unique invite link
-        return bin2hex(random_bytes(5)); // Example code generation
-
-
+        return bin2hex(random_bytes(5)); // Example of generating a random code
+    
         /*
         $length = 8;
         $characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
