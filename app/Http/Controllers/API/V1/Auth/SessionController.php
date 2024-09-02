@@ -19,7 +19,7 @@ class SessionController extends Controller
     {
         // Validate the request
         $attributes = Validator::make($request->all(), [
-            'email' => 'required|string|email:rfc,dns|max:255|unique:users',
+            'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:6',
             'referral_code' => 'nullable|string'
         ]);
