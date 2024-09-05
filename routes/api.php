@@ -6,7 +6,7 @@ use App\Http\Controllers\API\V1\ForgotPasswordController;
 use App\Http\Controllers\API\V1\ResetPasswordController;
 
 
-
+ph you exits noe
 
 Route::prefix('v1')->group(function () {
     Route::prefix('auth')->group(function () {
